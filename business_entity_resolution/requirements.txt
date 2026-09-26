@@ -1,0 +1,14 @@
+# Tested with Python 3.13 in the Replit workspace; versions below retain
+# Python 3.10 compatibility for standalone reproduction.
+numpy==2.2.6
+scipy==1.15.3
+scikit-learn==1.7.2
+joblib==1.4.2
+threadpoolctl==3.6.0
+rapidfuzz>=3.0.0
+metaphone>=0.6
+
+# Optional: Dense semantic retrieval for enhanced blocking.
+# Uncomment to enable the dense blocker (Objective: Blocker 2).
+# sentence-transformers>=2.2.0
+# faiss-cpu>=1.7.4

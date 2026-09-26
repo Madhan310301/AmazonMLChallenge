@@ -1,0 +1,1 @@
+"""Optional synthetic data generator for smoke runs."""

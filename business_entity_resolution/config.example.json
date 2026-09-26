@@ -1,0 +1,21 @@
+{
+  "data_root": "dataset",
+  "output_dir": "output",
+  "cache_dir": "cache",
+  "model_dir": "models",
+  "seed": 42,
+  "validation_fraction": 0.2,
+  "minhash_permutations": 48,
+  "minhash_bands": 12,
+  "ngram_size": 3,
+  "max_candidates_per_entity": 60,
+  "max_posting_size": 500,
+  "rf_estimators": 240,
+  "threshold_min": 0.5,
+  "threshold_max": 0.99,
+  "threshold_steps": 50,
+  "cardinality": "infer",
+  "random_forest_max_depth": null,
+  "dense_model_name": null,
+  "dense_top_k": 20
+}

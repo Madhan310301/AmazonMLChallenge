@@ -40,6 +40,8 @@ testem.log
 # System Files
 .DS_Store
 Thumbs.db
+__MACOSX/
+**/__MACOSX/
 
 .cursor/rules/nx-rules.mdc
 .github/instructions/nx.instructions.md
@@ -47,3 +49,34 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Python
+.pythonlibs/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.pkl
+*.tmp
+.streamlit/
+
+# Datasets (large files - exclude from git)
+Dataset/
+**/Dataset/
+dataset/
+**/dataset/
+*dataset_bak*/
+**/*dataset_bak*/
+*_bak/
+**/*_bak/
+*.zip
+*.tar.gz
+
+# Entity-resolution generated state
+business_entity_resolution/cache/*
+!business_entity_resolution/cache/.gitkeep
+business_entity_resolution/models/*
+!business_entity_resolution/models/.gitkeep
+business_entity_resolution/output/*
+!business_entity_resolution/output/.gitkeep

@@ -59,6 +59,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Report dataset availability, schema validity, and row counts.",
     )
+    parser.add_argument(
+        "--max-train-records",
+        type=int,
+        default=None,
+        help="Optional maximum number of training Source 1 entities to use for model fitting.",
+    )
     return parser
 
 
@@ -120,6 +126,8 @@ def main(argv: list[str] | None = None) -> int:
         settings = replace(settings, data_root=str(args.data_root))
     if args.output_dir:
         settings = replace(settings, output_dir=str(args.output_dir))
+    if args.max_train_records:
+        settings = replace(settings, max_train_records=args.max_train_records)
     resolved = settings.resolved(PROJECT_ROOT)
 
     # Check if data is available before attempting to run

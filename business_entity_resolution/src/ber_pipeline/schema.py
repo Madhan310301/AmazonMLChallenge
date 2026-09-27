@@ -58,8 +58,9 @@ def resolve_column(columns: Iterable[str], logical_name: str, explicit: str | No
 def infer_ground_truth_pairs(
     rows: list[dict[str, str]],
     source1_ids: set[str],
-    source2_ids: set[str],
-    source3_ids: set[str],
+    source2_ids: set[str] | None = None,
+    source3_ids: set[str] | None = None,
+    allow_missing: bool = False,
 ) -> set[tuple[str, str, str]]:
     if not rows:
         raise ValueError("Ground-truth file is empty.")
@@ -92,29 +93,32 @@ def infer_ground_truth_pairs(
     generic_matches_column = find("match_ids", "matches")
     matched_entity_ids_column = find("matched_entity_ids", "matched_ids", "candidate_entity_ids", "match_id_list")
 
+    is_subsampled = allow_missing or (len(source1_ids) < len(rows))
     pairs: set[tuple[str, str, str]] = set()
     for row_number, row in enumerate(rows, start=2):
         source1_id = str(row.get(source1_column, "")).strip()
         if not source1_id:
             continue
         if source1_id not in source1_ids:
+            if is_subsampled:
+                continue
             raise ValueError(
                 f"Ground truth row {row_number} references unknown Source 1 ID "
                 f"{source1_id!r}."
             )
         if source2_column:
             for target_id in _split_ids(row.get(source2_column, "")):
-                _add_pair(pairs, source1_id, "source2", target_id, source2_ids, row_number)
+                _add_pair(pairs, source1_id, "source2", target_id, source2_ids, row_number, allow_missing=is_subsampled)
         if source3_column:
             for target_id in _split_ids(row.get(source3_column, "")):
-                _add_pair(pairs, source1_id, "source3", target_id, source3_ids, row_number)
+                _add_pair(pairs, source1_id, "source3", target_id, source3_ids, row_number, allow_missing=is_subsampled)
         if target_source_column and target_id_column:
             target_source = _normalize_target_source(row.get(target_source_column, ""))
             target_ids = _split_ids(row.get(target_id_column, ""))
             target_pool = source2_ids if target_source == "source2" else source3_ids
             for target_id in target_ids:
                 _add_pair(
-                    pairs, source1_id, target_source, target_id, target_pool, row_number
+                    pairs, source1_id, target_source, target_id, target_pool, row_number, allow_missing=is_subsampled
                 )
         elif generic_matches_column:
             # Generic match lists accept explicit source prefixes: source2:id or source3:id.
@@ -127,13 +131,13 @@ def infer_ground_truth_pairs(
                 target_source, target_id = value.split(":", 1)
                 target_source = _normalize_target_source(target_source)
                 pool = source2_ids if target_source == "source2" else source3_ids
-                _add_pair(pairs, source1_id, target_source, target_id, pool, row_number)
+                _add_pair(pairs, source1_id, target_source, target_id, pool, row_number, allow_missing=is_subsampled)
         elif matched_entity_ids_column:
             for value in _split_ids(row.get(matched_entity_ids_column, "")):
                 if value.startswith("S2-"):
-                    _add_pair(pairs, source1_id, "source2", value, source2_ids, row_number)
+                    _add_pair(pairs, source1_id, "source2", value, source2_ids, row_number, allow_missing=is_subsampled)
                 elif value.startswith("S3-"):
-                    _add_pair(pairs, source1_id, "source3", value, source3_ids, row_number)
+                    _add_pair(pairs, source1_id, "source3", value, source3_ids, row_number, allow_missing=is_subsampled)
                 elif value.startswith("S1-"):
                     continue
                 else:
@@ -222,12 +226,15 @@ def _add_pair(
     source1_id: str,
     target_source: str,
     target_id: str,
-    target_pool: set[str],
+    target_pool: set[str] | None,
     row_number: int,
+    allow_missing: bool = False,
 ) -> None:
     if not target_id:
         return
-    if target_id not in target_pool:
+    if target_pool is not None and target_id not in target_pool:
+        if allow_missing:
+            return
         raise ValueError(
             f"Ground truth row {row_number} references unknown {target_source} ID "
             f"{target_id!r}."

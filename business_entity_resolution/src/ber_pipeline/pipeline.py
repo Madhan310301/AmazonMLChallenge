@@ -17,7 +17,7 @@ from .decision import resolve_matches
 from .diagnostics import build_diagnostics
 from .evaluate import macro_fbeta, tune_threshold
 from .features import FEATURE_NAMES, compute_features, deterministic_rule, fit_idf
-from .io import load_ground_truth_rows, load_source, read_tsv, write_tsv
+from .io import load_ground_truth_rows, load_source, read_tsv, read_tsv_header, write_tsv
 from .preprocess import preprocess_record
 from .schema import infer_cardinality, infer_ground_truth_pairs, schema_summary
 from .scoring import MatchScorer
@@ -59,7 +59,7 @@ def run_pipeline(
     dataset_mode = discovery["dataset_mode"]
     official_submission_allowed = discovery["official_submission_allowed"]
 
-    data = _load_and_prepare(settings, cache)
+    data = _load_and_prepare(settings, cache, stage=stage)
     if stage == "inspect":
         report = _inspect(data)
         _write_json(settings.output_dir / "schema_summary.json", report)
@@ -128,7 +128,7 @@ def run_pipeline(
             "At least two Source 1 training rows are required for a held-out "
             "validation split."
         )
-    if not test1:
+    if stage != "evaluate" and not test1:
         raise ValueError("The test Source 1 file contains no entities.")
 
     cardinality = (
@@ -144,6 +144,16 @@ def run_pipeline(
         settings.validation_fraction,
         settings.seed,
     )
+    if settings.max_train_records and len(fit_ids) > settings.max_train_records:
+        LOGGER.info(
+            "[SAMPLE] Subsampling fit Source 1 entities from %d to %d for model fitting",
+            len(fit_ids),
+            settings.max_train_records,
+        )
+        fit_ids = fit_ids[:settings.max_train_records]
+        max_val = max(2, int(settings.max_train_records * settings.validation_fraction))
+        if len(validation_ids) > max_val:
+            validation_ids = validation_ids[:max_val]
     train1_by_id = {record["id"]: record for record in train1}
     fit_source1 = [train1_by_id[record_id] for record_id in fit_ids]
     validation_source1 = [train1_by_id[record_id] for record_id in validation_ids]
@@ -274,11 +284,20 @@ def run_pipeline(
         candidate_recall,
         threshold,
     )
+    if stage == "evaluate":
+        validation_model.save(
+            settings.model_dir,
+            optimal_threshold=threshold,
+            validation_f0_5=float(validation_metrics["macro_f0_5"]),
+        )
+        LOGGER.info("[EVALUATE] Model and optimal threshold saved to %s", settings.model_dir)
+        return validation_metrics
 
     all_train_targets = {"source2": train2, "source3": train3}
     full_idf = fit_idf(train1 + train2 + train3)
+    train1_for_fit = train1[:settings.max_train_records] if settings.max_train_records else train1
     all_train_candidates = _build_candidates(
-        train1,
+        train1_for_fit,
         all_train_targets,
         settings,
         cache=cache,
@@ -287,7 +306,7 @@ def run_pipeline(
     )
     all_train_features = _feature_rows(
         all_train_candidates,
-        train1,
+        train1_for_fit,
         all_train_targets,
         full_idf,
         cache=cache,
@@ -510,7 +529,7 @@ def run_pipeline(
     return report
 
 
-def _load_and_prepare(settings: ResolvedSettings, cache: CacheStore) -> dict:
+def _load_and_prepare(settings: ResolvedSettings, cache: CacheStore, stage: str = "all") -> dict:
     train_dir = settings.data_root / "train"
     test_dir = settings.data_root / "test"
     source_paths = {
@@ -531,41 +550,55 @@ def _load_and_prepare(settings: ResolvedSettings, cache: CacheStore) -> dict:
     ]
     dataset_fingerprint = file_fingerprint(all_paths)
     LOGGER.info("[LOAD] Read local TSV inputs from %s", settings.data_root)
-    for split_name, mapping in (("train", TRAIN_FILES), ("test", TEST_FILES)):
-        for logical_source, (filename, cache_name) in mapping.items():
-            path = source_paths[split_name][logical_source]
-            columns, input_rows = read_tsv(path)
-            columns_by_name[cache_name] = columns
-            metadata = cache_metadata(
-                dataset_fingerprint=file_fingerprint([path]),
-                source_name=cache_name,
-                row_count=len(input_rows),
-                columns=columns,
-                configuration={"preprocessing_version": "unicode-name-address-v1"},
-                feature_version="features-v1",
-            )
-            cached = cache.read_json(f"prepared_{cache_name}", metadata)
-            if cached is None:
-                loaded = load_source(path, cache_name)
-                prepared = [preprocess_record(record) for record in loaded]
-                cache.write_json(f"prepared_{cache_name}", metadata, prepared)
-            else:
-                prepared = cached
-            raw_records[split_name][logical_source] = prepared
-            LOGGER.info(
-                "[SCHEMA] %s rows=%d columns=%s",
-                cache_name,
-                len(prepared),
-                ", ".join(columns),
-            )
 
-    ground_truth_rows = load_ground_truth_rows(source_paths["train"]["ground_truth"])
+    # 1. Load train source1 (with max_train_records limit if specified)
+    s1_path = source_paths["train"]["source1"]
+    s1_cols = read_tsv_header(s1_path)
+    columns_by_name["train_source1"] = s1_cols
+    loaded_s1 = load_source(s1_path, "train_source1", max_records=settings.max_train_records)
+    prep_s1 = [preprocess_record(r) for r in loaded_s1]
+    raw_records["train"]["source1"] = prep_s1
+    LOGGER.info("[SCHEMA] train_source1 rows=%d columns=%s", len(prep_s1), ", ".join(s1_cols))
+
+    # 2. Inspect ground truth to find needed target IDs for the loaded Source 1 entities
+    s1_id_set = {r["id"] for r in prep_s1}
+    ground_truth_rows = load_ground_truth_rows(source_paths["train"]["ground_truth"], source1_ids=s1_id_set)
+    temp_truth = infer_ground_truth_pairs(ground_truth_rows, s1_id_set, None, None)
+    needed_s2_ids = {pair[2] for pair in temp_truth if pair[1] == "source2"}
+    needed_s3_ids = {pair[2] for pair in temp_truth if pair[1] == "source3"}
+
+    # 3. Load train source2 and source3 with needed targets + background pool
+    target_bg_limit = (settings.max_train_records * 2) if settings.max_train_records else None
+    for src_name, needed_ids in (("source2", needed_s2_ids), ("source3", needed_s3_ids)):
+        path = source_paths["train"][src_name]
+        cols = read_tsv_header(path)
+        columns_by_name[f"train_{src_name}"] = cols
+        loaded = load_source(path, f"train_{src_name}", max_records=target_bg_limit, needed_ids=needed_ids if settings.max_train_records else None)
+        prep = [preprocess_record(r) for r in loaded]
+        raw_records["train"][src_name] = prep
+        LOGGER.info("[SCHEMA] train_%s rows=%d columns=%s", src_name, len(prep), ", ".join(cols))
+
+    # 4. Filter truth with the actual loaded targets
     truth = infer_ground_truth_pairs(
         ground_truth_rows,
-        {record["id"] for record in raw_records["train"]["source1"]},
+        s1_id_set,
         {record["id"] for record in raw_records["train"]["source2"]},
         {record["id"] for record in raw_records["train"]["source3"]},
     )
+
+    # 5. Load test data only if needed by stage
+    if stage in {"inspect", "preprocess", "all", "decision"}:
+        for logical_source, (filename, cache_name) in TEST_FILES.items():
+            path = source_paths["test"][logical_source]
+            cols = read_tsv_header(path)
+            columns_by_name[cache_name] = cols
+            loaded = load_source(path, cache_name)
+            prep = [preprocess_record(r) for r in loaded]
+            raw_records["test"][logical_source] = prep
+            LOGGER.info("[SCHEMA] %s rows=%d columns=%s", cache_name, len(prep), ", ".join(cols))
+    else:
+        for logical_source in TEST_FILES:
+            raw_records["test"][logical_source] = []
 
     # Multi-branch chain detection (Upgrade 14)
     all_loaded_records = [

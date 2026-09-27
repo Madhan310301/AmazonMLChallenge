@@ -32,6 +32,7 @@ class Settings:
     dense_top_k: int = 20
     source2_top_k: int = 8
     source3_top_k: int = 8
+    max_train_records: int | None = None
 
     def resolved(self, root: Path = PROJECT_ROOT) -> "ResolvedSettings":
         return ResolvedSettings(
@@ -56,6 +57,7 @@ class Settings:
             dense_top_k=self.dense_top_k,
             source2_top_k=self.source2_top_k,
             source3_top_k=self.source3_top_k,
+            max_train_records=self.max_train_records,
         )
 
 
@@ -82,6 +84,7 @@ class ResolvedSettings:
     dense_top_k: int
     source2_top_k: int
     source3_top_k: int
+    max_train_records: int | None
 
     def to_dict(self) -> dict[str, Any]:
         return {

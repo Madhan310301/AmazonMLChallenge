@@ -4,99 +4,199 @@
 - **Team Leader:** Madhan Kumar T
 - **Team Members:** Dharshini K, Allen Xavier K
 - **Challenge:** Amazon ML Challenge 2026 — Business Entity Resolution
+- **Evaluation Metric:** Macro F₀.₅ (Precision-Weighted)
+- **Constraints:** 100% Offline, CPU Execution, Strict Submission Schemas
 
 ---
 
-## 📌 Overview
+## Overview
 
-An offline, CPU-runnable, high-precision record linkage and entity resolution pipeline designed to resolve ambiguous business entities from **Source 1** into **Source 2** and **Source 3**. 
+A production-grade, offline, CPU-runnable entity resolution pipeline that resolves ambiguous business records from **Source 1** into **Source 2** and **Source 3** across 26.4 million records spanning multiple countries and languages.
 
-The system is optimized for **Macro $F_{0.5}$** (precision over recall), supports multi-source links when present in ground truth, handles open-text international address/country fields, and strictly complies with the official competition submission schema.
-
----
-
-## 🚀 Key Upgraded Architecture Highlights
-
-1. **Unicode NFKD Normalization**: Decomposes accents, cleans typographical variations, and normalizes international character sets without destroying meaning (`Société Générale` $\to$ `societe generale`).
-2. **French Commercial Routing & CEDEX**: Isolates French commercial routing (`CEDEX`, `BP`, postal box numbers) so that commercial routing digits never contaminate building/street number comparisons.
-3. **Descriptive Landmark Extraction**: Automatically detects and separates descriptive landmark markers (`Near`, `Opposite`, `Behind`, `Adjacent to`) from core street addresses.
-4. **Corsican Alphanumeric & Open Postal Normalization**: Full support for Corsican postal departments (`2A`, `2B`) and variable-format postal codes worldwide.
-5. **Source-Balanced Blocking Quotas**: Dedicated candidate budgets for Source 2 (`source2_top_k = 8`) and Source 3 (`source3_top_k = 8`) preventing dominant sources from starving candidates.
-6. **Directional Indexing**: Efficient directional candidate generation ($S_1 \to S_2 \cup S_3$) with structural self-match prevention ($S_1 \cap S_1 = \emptyset$).
-7. **Hard-Negative Mining**: Samples challenging negatives during training prioritized by composite lexical and spatial difficulty.
-8. **Tri-State Building Number Agreement**: Explicit match (`+1.0`), missing/unspecified (`0.0`), or explicit street number conflict (`-1.0`).
-9. **Phonetic & Token Similarity**: Double Metaphone phonetic similarity alongside RapidFuzz `token_set_ratio` to withstand colloquial misspellings and transliteration drift.
-10. **Restricted Auto-Accept Rule**: High-confidence fast-path that requires exact name, exact postal code, matching country, and positive street number agreement.
-11. **Multi-Branch Chain Guard**: Detects chain brands (frequency $\ge 3$) and suppresses auto-accept to prevent false positives across multi-branch retailers.
-12. **Dynamic Macro $F_{0.5}$ Threshold Sweep**: Automatically discovers and sets the optimal precision-favoring decision threshold during validation, persisting it to `models/metadata.json`.
-13. **Global Conflict Resolution**: Resolves candidate assignments in descending order of confidence score to eliminate arbitrary processing order bias.
-14. **Official Validator Compliant**: Generates both `matching_results.tsv` and `candidate_pairs.tsv` in the exact wide format, passing the official `validate_submission.py` test suite with `--check-ids`.
+The pipeline heavily favors **precision over recall** (F₀.₅), supports multi-source matching and singletons, handles noisy multilingual addresses, and strictly complies with the official Amazon ML Challenge submission format.
 
 ---
 
-## 📂 Repository Structure
+## Architecture
 
-```text
-├── app.py                                   # Streamlit Interactive Pipeline Dashboard
-├── business_entity_resolution/
-│   ├── README.md                            # Detailed Pipeline Documentation
-│   ├── run.py                               # Pipeline CLI entry point
-│   ├── requirements.txt                     # Dependencies
-│   ├── src/ber_pipeline/
-│   │   ├── blocking.py                      # Multi-stage balanced blocking
-│   │   ├── decision.py                      # Decision rules & global conflict resolution
-│   │   ├── evaluate.py                      # Macro F0.5 optimization & evaluation
-│   │   ├── features.py                      # 14+ feature extractors (Phonetic, Jaro, Tri-state)
-│   │   ├── io.py                            # Streaming & buffered TSV I/O
-│   │   ├── output_adapter.py                # Official submission format exporter
-│   │   ├── pipeline.py                      # End-to-end orchestration
-│   │   ├── preprocess.py                    # Unicode, landmark, and postal cleaning
-│   │   ├── schema.py                        # Dataset schema detection & mapping
-│   │   └── scoring.py                       # ML & rule-based scoring models
-│   ├── tests/                               # Comprehensive unit test suite (33 tests)
-│   └── utils/
-│       └── validate_submission.py           # Official competition validator
+```
+Source 1/2/3 TSVs
+    │
+    ▼
+┌──────────────────────────────────────────────┐
+│ Stage 0: Preprocessing                       │
+│  • NFKD Unicode normalization                │
+│  • French CEDEX/BP routing isolation         │
+│  • Landmark extraction (Near/Opposite/...)   │
+│  • Corsican & open postal normalization      │
+│  • Legal suffix cleanup (GmbH, LLC, Pvt Ltd) │
+└──────────────────────────────────────────────┘
+    │
+    ▼
+┌──────────────────────────────────────────────┐
+│ Stage 1: Multi-Pass Blocking                 │
+│  • MinHash LSH (48 perms, 12 bands)          │
+│  • Token inverted index with IDF weights     │
+│  • Country-adaptive postal prefix indexing   │
+│  • Country hard partitioning                 │
+│  • Top-K balanced quotas (8 per source)      │
+│  • Optional dense FAISS retrieval            │
+└──────────────────────────────────────────────┘
+    │
+    ▼
+┌──────────────────────────────────────────────┐
+│ Stage 2: Feature Engineering (38 signals)    │
+│  • Jaro-Winkler, Levenshtein distances       │
+│  • Token Jaccard, Set Ratio, Rare Tokens     │
+│  • Tri-state street number (+1/0/-1)         │
+│  • Double Metaphone / Soundex phonetics      │
+│  • Geographic concordance features           │
+│  • Interaction terms (name×postal, etc.)     │
+└──────────────────────────────────────────────┘
+    │
+    ▼
+┌──────────────────────────────────────────────┐
+│ Stage 3: Scoring (LightGBM / Random Forest)  │
+│  • Hard-negative mining (2:1 ratio)          │
+│  • Bounded depth (max_depth=16)              │
+│  • Held-out Macro F₀.₅ threshold sweep      │
+└──────────────────────────────────────────────┘
+    │
+    ▼
+┌──────────────────────────────────────────────┐
+│ Stage 4: Decision & Conflict Resolution      │
+│  • Restricted auto-accept rule               │
+│  • Multi-branch chain guard (≥3)             │
+│  • Global 1-to-1 Hungarian assignment        │
+│  • Confidence-descending conflict resolution │
+└──────────────────────────────────────────────┘
+    │
+    ▼
+┌──────────────────────────────────────────────┐
+│ Stage 5: Output                              │
+│  • matching_results.tsv (official format)    │
+│  • candidate_pairs.tsv  (official format)    │
+│  • submission.zip (ready for portal upload)  │
+│  • Internal diagnostic debug tables          │
+└──────────────────────────────────────────────┘
 ```
 
 ---
 
-## ⚡ Quickstart
+## Repository Structure
 
-### 1. Installation
+```
+├── README.md                                    # This file
+├── .gitignore                                   # Keeps datasets & artifacts out of GitHub
+└── business_entity_resolution/
+    ├── README.md                                # Detailed pipeline documentation
+    ├── run.py                                   # CLI entry point
+    ├── app.py                                   # Streamlit interactive dashboard
+    ├── requirements.txt                         # Python dependencies
+    ├── config.example.json                      # Configuration template
+    ├── examples/
+    │   └── create_demo_dataset.py               # Synthetic data generator (--make-demo)
+    ├── src/ber_pipeline/
+    │   ├── blocking.py                          # Multi-pass blocking with country partitioning
+    │   ├── cache.py                             # Fingerprint-based caching
+    │   ├── cli.py                               # Command-line interface
+    │   ├── config.py                            # Settings & configuration
+    │   ├── dataset_discovery.py                 # Dataset detection & validation
+    │   ├── decision.py                          # Decision rules & conflict resolution
+    │   ├── diagnostics.py                       # Error analysis
+    │   ├── evaluate.py                          # Macro F₀.₅ evaluation & threshold sweep
+    │   ├── features.py                          # 38-feature extractor with phonetic fallback
+    │   ├── io.py                                # Streaming & buffered TSV I/O
+    │   ├── output_adapter.py                    # Official submission format + zip packaging
+    │   ├── pipeline.py                          # End-to-end orchestration
+    │   ├── preprocess.py                        # Unicode/address/postal normalization
+    │   ├── schema.py                            # Column alias resolution & ground truth parsing
+    │   └── scoring.py                           # LightGBM + Random Forest dual-engine scorer
+    ├── tests/                                   # 33 unit tests (preprocessing, blocking,
+    │   ├── test_blocking.py                     #   features, schema, scoring, decision)
+    │   ├── test_cache_scoring.py
+    │   ├── test_evaluate_decision.py
+    │   ├── test_features.py
+    │   ├── test_preprocess.py
+    │   └── test_schema.py
+    └── utils/
+        └── validate_submission.py               # Official competition validator
+```
+
+---
+
+## Quickstart
+
+### 1. Install Dependencies
 
 ```bash
 cd business_entity_resolution
 pip install -r requirements.txt
 ```
 
-### 2. Run All Unit Tests
+### 2. Run Unit Tests
 
 ```bash
 python -m unittest discover -s tests -v
+# Expected: 33 tests, 0 failures
 ```
 
-### 3. Generate Synthetic Demo Data & Run Pipeline
+### 3. Demo Run (Synthetic Data)
 
 ```bash
-# Generate synthetic dataset with realistic noise and hard negatives
 python run.py --make-demo
-
-# Execute end-to-end pipeline
 python run.py --data-root dataset/ --verbose
 ```
 
-### 4. Validate Official Submission Format
+### 4. Official Competition Run
+
+Place official TSVs into `dataset/train/` and `dataset/test/`, then:
+
+```bash
+python run.py --data-root dataset/ --verbose
+```
+
+### 5. Validate Submission
 
 ```bash
 python utils/validate_submission.py \
-    --submission-dir output/submission \
+    --matching output/matching_results.tsv \
+    --candidate output/candidate_pairs.tsv \
     --test-dir dataset/test \
     --check-ids
 ```
 
-### 5. Launch the Interactive Dashboard
+### 6. Launch Interactive Dashboard
 
 ```bash
 python -m streamlit run app.py
 ```
-Open [http://localhost:8501](http://localhost:8501) in your browser to inspect matches, confidence distributions, blocking recall, and decision breakdowns in real time.
+
+---
+
+## Dataset Scale (Official Competition)
+
+| File | Records |
+|---|---:|
+| `train_source1.tsv` | 2,206,821 |
+| `train_source2.tsv` | 5,034,616 |
+| `train_source3.tsv` | 5,285,603 |
+| `train_ground_truth.tsv` | 2,206,821 |
+| `test_source1.tsv` | 1,732,544 |
+| `test_source2.tsv` | 4,887,273 |
+| `test_source3.tsv` | 5,082,316 |
+| **Total** | **26,435,994** |
+
+---
+
+## Key Design Decisions
+
+1. **Precision over Recall:** F₀.₅ penalizes precision 4× more heavily than recall. Every architectural choice favors not making false matches over not missing true matches.
+
+2. **Country Hard Partitioning:** Candidates from different countries are rejected at blocking stage, eliminating cross-border false positives (e.g., US Domino's ≠ Indian Domino's).
+
+3. **Hard-Negative Mining:** Training uses blocking-generated near-miss pairs (same city/postal/name tokens but different entities) rather than random negatives, forcing the model to learn subtle discriminative signals.
+
+4. **Dual-Engine Scoring:** LightGBM is preferred when available for faster training; Scikit-Learn Random Forest serves as a universal fallback. Tree depth is bounded to 16 to cap memory usage.
+
+5. **Pure-Python Phonetic Fallback:** A built-in Soundex implementation ensures phonetic similarity is always computed, even without optional C-extension dependencies.

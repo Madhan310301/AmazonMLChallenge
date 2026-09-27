@@ -1,34 +1,61 @@
-# See https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files for more about ignoring files.
+# === Amazon ML Challenge 2026 — Business Entity Resolution ===
+# This .gitignore keeps the GitHub repo clean.
+# Files removed from tracking are still on your local disk.
 
-# compiled output
-dist
-tmp
-out-tsc
+# ── Replit / Platform Scaffold (not part of the project) ──
+.replit
+.replitignore
+.npmrc
+replit.md
+artifacts/
+lib/
+scripts/
+pnpm-lock.yaml
+pnpm-workspace.yaml
+package.json
+tsconfig.json
+tsconfig.base.json
+node_modules/
+main.py
+pyproject.toml
+uv.lock
+
+# ── Old / Draft Reports (kept locally, removed from GitHub) ──
+Build_Report_Business_Entity_Resolution.md
+Documentation_template.md
+Entity_Resolution_Existing_Solutions.md
+NEW_EXISTING_SYSTEMS.md
+Project_Build_Prompt_Entity_Resolution.md
+PROJECT_PROGRESS_REPORT.md
+business_entity_resolution/Documentation_template.md
+
+# ── Root-level app.py (Streamlit dashboard lives inside business_entity_resolution/) ──
+/app.py
+
+# ── Compiled / Build Output ──
+dist/
+tmp/
+out-tsc/
 *.tsbuildinfo
-.expo
-.expo-shared
+.expo/
+.expo-shared/
 push_to_github.bat
 
-# dependencies
-node_modules
-
-# IDEs and editors
-/.idea
+# ── IDE / Editor Settings ──
+/.idea/
 .project
 .classpath
 .c9/
 *.launch
 .settings/
 *.sublime-workspace
-
-# IDE - VSCode
 .vscode/*
 !.vscode/settings.json
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
 
-# misc
+# ── Misc Logs ──
 /.sass-cache
 /connect.lock
 /coverage
@@ -38,20 +65,19 @@ yarn-error.log
 testem.log
 /typings
 
-# System Files
+# ── System Files ──
 .DS_Store
 Thumbs.db
 __MACOSX/
 **/__MACOSX/
 
-.cursor/rules/nx-rules.mdc
-.github/instructions/nx.instructions.md
-
-# Replit
+# ── Replit Cache ──
 .cache/
 .local/
+.cursor/
+.github/instructions/
 
-# Python
+# ── Python ──
 .pythonlibs/
 __pycache__/
 **/__pycache__/
@@ -62,7 +88,7 @@ venv/
 *.tmp
 .streamlit/
 
-# Datasets (large files - exclude from git)
+# ── Competition Datasets (large files — NEVER push to GitHub) ──
 Dataset/
 **/Dataset/
 dataset/
@@ -74,10 +100,14 @@ dataset/
 *.zip
 *.tar.gz
 
-# Entity-resolution generated state
+# ── Entity-Resolution Generated State ──
 business_entity_resolution/cache/*
 !business_entity_resolution/cache/.gitkeep
 business_entity_resolution/models/*
 !business_entity_resolution/models/.gitkeep
 business_entity_resolution/output/*
 !business_entity_resolution/output/.gitkeep
+
+# ── Conversation / Agent State ──
+.agents/
+.conversation/

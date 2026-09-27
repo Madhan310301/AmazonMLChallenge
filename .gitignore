@@ -111,3 +111,4 @@ business_entity_resolution/output/*
 # ── Conversation / Agent State ──
 .agents/
 .conversation/
+FINAL_CONSOLIDATED_REPORT.md

@@ -133,8 +133,8 @@ def compute_features(
     else:
         token_set_ratio = name_jaccard
 
-    # Phonetic similarity feature using Double Metaphone
-    if HAS_METAPHONE and left_name and right_name:
+    # Phonetic similarity feature using Double Metaphone or pure-Python Soundex fallback
+    if left_name and right_name:
         phonetic_sim = _phonetic_similarity(
             left.get("name_tokens", []), right.get("name_tokens", [])
         )
@@ -249,12 +249,44 @@ def deterministic_rule(
     return False, 0.0, ""
 
 
+def _soundex(token: str) -> str:
+    """Pure-Python Soundex implementation for phonetic similarity fallback."""
+    token = token.upper()
+    if not token or not token[0].isalpha():
+        return ""
+    mapping = {
+        "B": "1", "F": "1", "P": "1", "V": "1",
+        "C": "2", "G": "2", "J": "2", "K": "2", "Q": "2", "S": "2", "X": "2", "Z": "2",
+        "D": "3", "T": "3",
+        "L": "4",
+        "M": "5", "N": "5",
+        "R": "6",
+    }
+    first = token[0]
+    encoded = [first]
+    prev = mapping.get(first, "")
+    for char in token[1:]:
+        digit = mapping.get(char, "")
+        if digit:
+            if digit != prev:
+                encoded.append(digit)
+                prev = digit
+        else:
+            prev = ""
+    res = "".join(encoded) + "000"
+    return res[:4]
+
+
 def _phonetic_similarity(tokens1: list[str], tokens2: list[str]) -> float:
     if not tokens1 or not tokens2:
         return 0.0
     try:
-        codes1 = [metaphone.doublemetaphone(t)[0] for t in tokens1 if t]
-        codes2 = [metaphone.doublemetaphone(t)[0] for t in tokens2 if t]
+        if HAS_METAPHONE:
+            codes1 = [metaphone.doublemetaphone(t)[0] for t in tokens1 if t]
+            codes2 = [metaphone.doublemetaphone(t)[0] for t in tokens2 if t]
+        else:
+            codes1 = [_soundex(t) for t in tokens1 if t]
+            codes2 = [_soundex(t) for t in tokens2 if t]
         str1 = " ".join(c for c in codes1 if c)
         str2 = " ".join(c for c in codes2 if c)
         if not str1 or not str2:

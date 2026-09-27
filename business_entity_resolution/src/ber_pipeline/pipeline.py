@@ -364,6 +364,7 @@ def run_pipeline(
             "rule_applied",
             *FEATURE_NAMES,
         ]
+        score_columns = list(dict.fromkeys(score_columns))
         write_tsv(
             settings.cache_dir / "test_scored_pairs.tsv",
             scored_candidates,
@@ -387,6 +388,7 @@ def run_pipeline(
         "rule_applied",
         *FEATURE_NAMES,
     ]
+    candidate_columns = list(dict.fromkeys(candidate_columns))
     matching_columns = [
         "source1_id",
         "target_source",
@@ -394,11 +396,12 @@ def run_pipeline(
         "confidence",
         "decision_reason",
     ]
-    write_tsv(settings.output_dir / "candidate_pairs.tsv", scored_candidates, candidate_columns)
-    write_tsv(settings.output_dir / "matching_results.tsv", matches, matching_columns)
+    # Save full internal diagnostic debug tables
+    write_tsv(settings.output_dir / "debug_candidate_pairs.tsv", scored_candidates, candidate_columns)
+    write_tsv(settings.output_dir / "debug_matching_results.tsv", matches, matching_columns)
 
     # Convert to official submission format (matching_results.tsv & candidate_pairs.tsv)
-    from .output_adapter import convert_to_submission
+    from .output_adapter import convert_to_submission, create_submission_zip
     submission_dir = settings.output_dir / "submission"
     all_test_s1_ids = {record["id"] for record in test1}
     submission_stats = convert_to_submission(
@@ -407,6 +410,15 @@ def run_pipeline(
         all_test_s1_ids=all_test_s1_ids,
         output_dir=submission_dir,
     )
+    # Also write official submission format directly into settings.output_dir for AWS evaluator compatibility
+    convert_to_submission(
+        internal_matches=matches,
+        internal_candidates=test_candidates,
+        all_test_s1_ids=all_test_s1_ids,
+        output_dir=settings.output_dir,
+    )
+    # Package into submission.zip
+    create_submission_zip(submission_dir, settings.output_dir / "submission.zip")
 
     test_candidate_counts = Counter(row["source1_id"] for row in test_candidates)
     diagnostics = build_diagnostics(

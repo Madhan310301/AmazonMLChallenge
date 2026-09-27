@@ -64,8 +64,10 @@ def generate_candidates(
             token_index[token].add(target["id"])
             document_frequency[token] += 1
         postal = target.get("postal_code_normalized", "")
-        if len(postal) >= 3:
-            postal_index[postal[:3]].add(target["id"])
+        country = target.get("country_normalized", "")
+        prefix = _extract_postal_prefix(postal, country)
+        if prefix:
+            postal_index[prefix].add(target["id"])
         street = target.get("street_number", "")
         if street:
             street_index[street].add(target["id"])
@@ -110,8 +112,10 @@ def generate_candidates(
                 evidence[target_id].add("token_posting")
                 retrieval_weight[target_id] += weight
         postal = source1.get("postal_code_normalized", "")
-        if len(postal) >= 3:
-            for target_id in postal_index.get(postal[:3], ()):
+        country = source1.get("country_normalized", "")
+        prefix = _extract_postal_prefix(postal, country)
+        if prefix:
+            for target_id in postal_index.get(prefix, ()):
                 evidence[target_id].add("token_posting")
                 retrieval_weight[target_id] += 1.5
         street = source1.get("street_number", "")
@@ -137,6 +141,13 @@ def generate_candidates(
             if target_id == source1["id"]:
                 continue
             target = target_by_id[target_id]
+
+            # Country hard partitioning: reject candidate if both countries are specified and conflict
+            c1 = source1.get("country_normalized")
+            c2 = target.get("country_normalized")
+            if c1 and c2 and c1 != c2:
+                continue
+
             cheap = _coarse_score(source1, target)
             
             multi_blocker_bonus = 0.2 if len(methods) == 3 else (0.1 if len(methods) > 1 else 0.0)
@@ -288,6 +299,21 @@ def _minhash_coefficients(seed: int, permutations: int) -> tuple[tuple[int, int]
         offset = int.from_bytes(digest[8:], "big") % prime
         coefficients.append((multiplier, offset))
     return tuple(coefficients)
+
+
+def _extract_postal_prefix(postal: str, country: str = "") -> str:
+    """Extract country-adaptive postal code prefix for spatial indexing."""
+    if not postal:
+        return ""
+    c = country.lower().strip()
+    # French departments: 2-digit department codes (e.g. 75, 13, 2A, 2B)
+    if c in ("france", "fr") or (len(postal) == 5 and postal[:2].isdigit() and not c):
+        return postal[:2]
+    # UK outward alphanumeric codes (e.g., SW1A 1AA -> SW1A)
+    if " " in postal:
+        return postal.split()[0]
+    # Default international (e.g. US, India): first 3 characters
+    return postal[:3] if len(postal) >= 3 else postal
 
 
 def _coarse_score(left: dict, right: dict) -> float:

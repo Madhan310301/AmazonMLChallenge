@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import zipfile
 from collections import defaultdict
 from pathlib import Path
 
@@ -142,3 +143,17 @@ def validate_submission_format(output_dir: Path | str, test_dir: Path | str = No
                 errors.append(f"Match {m} for {s1_id} not found in candidates")
                 
     return errors, warnings
+
+
+def create_submission_zip(source_dir: Path | str, zip_path: Path | str) -> Path:
+    """Pack matching_results.tsv and candidate_pairs.tsv into a competition submission zip."""
+    src = Path(source_dir)
+    dest = Path(zip_path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for fname in ["matching_results.tsv", "candidate_pairs.tsv"]:
+            fpath = src / fname
+            if fpath.exists():
+                zf.write(fpath, arcname=fname)
+                logger.info("Archived %s into submission zip", fname)
+    return dest

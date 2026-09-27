@@ -118,7 +118,7 @@ def validate_schemas(data_root: Path) -> list[str]:
         List of error strings (empty if all valid).
     """
     from .schema import resolve_column
-    from .io import read_tsv
+    from .io import read_tsv_header
 
     errors: list[str] = []
     train_dir = data_root / "train"
@@ -138,7 +138,7 @@ def validate_schemas(data_root: Path) -> list[str]:
         if not path.is_file():
             continue
         try:
-            columns, rows = read_tsv(path)
+            columns = read_tsv_header(path)
         except (ValueError, FileNotFoundError) as exc:
             errors.append(f"{label}: {exc}")
             continue
@@ -158,23 +158,11 @@ def validate_schemas(data_root: Path) -> list[str]:
                     f"Available columns: {', '.join(columns)}"
                 )
 
-        # Check for duplicate IDs
-        if id_col is not None:
-            seen_ids: set[str] = set()
-            for row_num, row in enumerate(rows, start=2):
-                rid = row.get(id_col, "").strip()
-                if rid in seen_ids:
-                    errors.append(f"{label}: duplicate ID '{rid}' at row {row_num}")
-                    break
-                seen_ids.add(rid)
-
     return errors
 
 
 def get_row_counts(data_root: Path) -> dict[str, int | None]:
-    """Get row counts for each expected file."""
-    from .io import read_tsv
-
+    """Get row counts for each expected file via fast streaming line counting."""
     counts: dict[str, int | None] = {}
     train_dir = data_root / "train"
     test_dir = data_root / "test"
@@ -183,8 +171,8 @@ def get_row_counts(data_root: Path) -> dict[str, int | None]:
         path = train_dir / filename
         if path.is_file():
             try:
-                _, rows = read_tsv(path)
-                counts[filename] = len(rows)
+                with path.open("rb") as f:
+                    counts[filename] = max(0, sum(1 for _ in f) - 1)
             except Exception:
                 counts[filename] = None
         else:
@@ -194,8 +182,8 @@ def get_row_counts(data_root: Path) -> dict[str, int | None]:
         path = test_dir / filename
         if path.is_file():
             try:
-                _, rows = read_tsv(path)
-                counts[filename] = len(rows)
+                with path.open("rb") as f:
+                    counts[filename] = max(0, sum(1 for _ in f) - 1)
             except Exception:
                 counts[filename] = None
         else:

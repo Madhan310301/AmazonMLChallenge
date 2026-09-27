@@ -9,14 +9,22 @@ from sklearn.ensemble import RandomForestClassifier
 from .features import FEATURE_NAMES
 
 
+try:
+    import lightgbm as lgb
+    HAS_LIGHTGBM = True
+except ImportError:
+    HAS_LIGHTGBM = False
+
+
 class MatchScorer:
-    """Precision-oriented random-forest pair classifier."""
+    """Precision-oriented pair classifier with LightGBM and Random Forest fallback."""
 
     def __init__(self, seed: int = 42, estimators: int = 240, max_depth: int | None = None):
         self.seed = seed
         self.estimators = estimators
-        self.max_depth = max_depth
-        self.model: RandomForestClassifier | None = None
+        self.max_depth = max_depth or 16  # Bounded depth protects against OOM on massive datasets
+        self.model = None
+        self.engine = "rf"
 
     def fit(self, feature_rows: list[dict[str, float]], labels: list[int]) -> "MatchScorer":
         classes = set(labels)
@@ -29,6 +37,25 @@ class MatchScorer:
                 "Inspect candidate blocking recall and ground-truth columns."
             )
         matrix = _matrix(feature_rows)
+        # Attempt LightGBM dual-engine for speed and memory efficiency
+        if HAS_LIGHTGBM:
+            try:
+                self.model = lgb.LGBMClassifier(
+                    n_estimators=self.estimators,
+                    max_depth=self.max_depth,
+                    random_state=self.seed,
+                    class_weight="balanced",
+                    n_jobs=-1,
+                    verbose=-1,
+                )
+                self.model.fit(matrix, labels)
+                self.engine = "lightgbm"
+                return self
+            except Exception:
+                pass
+
+        # Standard Scikit-Learn Random Forest with bounded depth
+        self.engine = "rf"
         self.model = RandomForestClassifier(
             n_estimators=self.estimators,
             max_depth=self.max_depth,
@@ -66,7 +93,8 @@ class MatchScorer:
             pickle.dump(self, stream, protocol=pickle.HIGHEST_PROTOCOL)
         temp_path.replace(model_path)
         metadata = {
-            "model": "sklearn.ensemble.RandomForestClassifier",
+            "model": "lightgbm.LGBMClassifier" if getattr(self, "engine", "rf") == "lightgbm" else "sklearn.ensemble.RandomForestClassifier",
+            "engine": getattr(self, "engine", "rf"),
             "seed": self.seed,
             "n_estimators": self.estimators,
             "max_depth": self.max_depth,
